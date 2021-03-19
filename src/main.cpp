@@ -11,15 +11,113 @@
 #include "nvs_flash.h"
 #include "driver/gpio.h"
 
-#include <map>
 #include <string>
 
 #define LED_GPIO_PIN                     5
 #define WIFI_CHANNEL_SWITCH_INTERVAL  (500)
 #define WIFI_CHANNEL_MAX               (13)
 
-uint8_t level = 0, channel = 1;
+typedef struct device{
+    std::string mac;
+    int rssi;
+    int timestamp;
+    bool isempty;
+    device *next;
+    device *prev;
+} device;
 
+class devicelist {
+
+    private:
+        device *head;
+
+    public:
+        devicelist() {
+            head = NULL;
+        }
+
+        void insert(std::string mac, int rssi, int timestamp) {
+            device *tmp = new device;
+            tmp->mac = mac;
+            tmp->rssi = rssi;
+            tmp->timestamp = timestamp;
+            tmp->isempty = false;
+
+            if (head == NULL) {
+                head = tmp;
+                head->prev = NULL;
+            } else {
+                device *pos;
+                pos = head;
+
+
+                while(pos->next != NULL) {
+                    if (pos->mac.compare(mac) == 0) {
+                        if (pos == head) {
+                            head = pos->next;
+                            break;
+                        } else {
+                            pos->prev->next = pos->next;
+                            pos = pos->prev;
+                        }
+                    }
+                    pos = pos->next;
+                }
+                pos = head;
+                while(pos->next != NULL && rssi < pos->rssi)  {
+                    pos = pos->next;
+                }
+                if (pos == head) {
+                    tmp->next = pos;
+                    tmp->prev = NULL;
+                    pos->prev = tmp;
+                    head = tmp;
+                } else if (pos->next != NULL) {
+                    tmp->next = pos->next;
+                    tmp->prev = pos;
+                    pos->next = tmp;
+                } else {
+                    tmp->next = NULL;
+                    tmp->prev = pos;
+                    pos->next = tmp;
+                }
+                
+            }
+        }
+        device* get() {
+            return head;
+        }
+
+        device* get(int n) {
+            device *tmp;
+            tmp = head;
+            for(int i = 0; i < n; i++) {
+                if (tmp->next != NULL) {
+                    tmp = tmp->next;
+                } else {
+                    device *empty = new device;
+                    empty->isempty = true;
+                    return empty;
+                }
+            }
+            return tmp;
+        }
+
+        int size() {
+            int i = 0;
+            device *tmp;
+            tmp = head;
+            while (tmp->next != NULL) {
+                tmp = tmp->next;
+                i++;
+            }
+            return i;
+        }
+};
+
+devicelist devices;
+
+uint8_t level = 0, channel = 1;
 TFT_eSPI tft = TFT_eSPI(135, 240);
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
 
@@ -82,25 +180,13 @@ void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
     const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
-
-    tft.setCursor(0,0);
-    tft.printf( "PACKET TYPE=%s, CHAN=%02d, RSSI=%02d\n"
-                "            ADDR1=%02x:%02x:%02x:%02x:%02x:%02x\n"
-                "            ADDR2=%02x:%02x:%02x:%02x:%02x:%02x\n"
-                "            ADDR3=%02x:%02x:%02x:%02x:%02x:%02x\n",
-        wifi_sniffer_packet_type2str(type),
-        ppkt->rx_ctrl.channel,
-        ppkt->rx_ctrl.rssi,
-        /* ADDR1 */
-        hdr->addr1[0],hdr->addr1[1],hdr->addr1[2],
-        hdr->addr1[3],hdr->addr1[4],hdr->addr1[5],
-        /* ADDR2 */
-        hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
-        hdr->addr2[3],hdr->addr2[4],hdr->addr2[5],
-        /* ADDR3 */
-        hdr->addr3[0],hdr->addr3[1],hdr->addr3[2],
-        hdr->addr3[3],hdr->addr3[4],hdr->addr3[5]
-    );
+    
+    char buffer[18];
+    sprintf(buffer,   "%02x:%02x:%02x:%02x:%02x:%02x",
+                            hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
+                            hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]
+                        );
+    devices.insert(buffer, ppkt->rx_ctrl.rssi, millis());
 }
 
 // the setup function runs once when you press reset or power the board
@@ -119,8 +205,18 @@ void loop() {
     //wifi_sniffer_set_channel(channel);
     //channel = (channel % WIFI_CHANNEL_MAX) + 1;
 
-    //tft.fillScreen(TFT_BLACK);
-    //tft.setCursor(0,0);
-
+    tft.fillScreen(TFT_BLACK);
+    tft.setCursor(0,0);
+    tft.printf("devices: %d\n", devices.size());
+    /*
+    for (int i = 0; i < devices.size(); i++) {
+        tft.printf("%s rssi: %d\n", devices.get(i)->mac.c_str(), devices.get(i)->rssi);
+    }*/
+    device *tmp = devices.get();
+    while (tmp->next != NULL) {
+        tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
+        tmp = tmp->next;
+    }
+    delay(1000);
 }
 
