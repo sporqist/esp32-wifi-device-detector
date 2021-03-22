@@ -21,7 +21,6 @@ typedef struct device{
     std::string mac;
     int rssi;
     int timestamp;
-    bool isempty;
     device *next;
     device *prev;
 } device;
@@ -29,85 +28,46 @@ typedef struct device{
 class devicelist {
 
     private:
-        device *head;
+        device *head, *tail;
 
     public:
         devicelist() {
-            head = NULL;
+            head = new device;
+            tail = new device;
+            head->next = tail;
+            tail->prev = head;
         }
 
         void insert(std::string mac, int rssi, int timestamp) {
+            device *pos = head->next;
+            while (pos != tail) {
+                if (pos->mac.compare(mac) == 0) {
+                    pos->rssi = rssi;
+                    pos->timestamp = timestamp;
+                    return;
+                }
+                pos = pos->next;
+            }
             device *tmp = new device;
             tmp->mac = mac;
             tmp->rssi = rssi;
             tmp->timestamp = timestamp;
-            tmp->isempty = false;
 
-            if (head == NULL) {
-                head = tmp;
-                head->prev = NULL;
-            } else {
-                device *pos;
-                pos = head;
-
-
-                while(pos->next != NULL) {
-                    if (pos->mac.compare(mac) == 0) {
-                        if (pos == head) {
-                            head = pos->next;
-                            break;
-                        } else {
-                            pos->prev->next = pos->next;
-                            pos = pos->prev;
-                        }
-                    }
-                    pos = pos->next;
-                }
-                pos = head;
-                while(pos->next != NULL && rssi < pos->rssi)  {
-                    pos = pos->next;
-                }
-                if (pos == head) {
-                    tmp->next = pos;
-                    tmp->prev = NULL;
-                    pos->prev = tmp;
-                    head = tmp;
-                } else if (pos->next != NULL) {
-                    tmp->next = pos->next;
-                    tmp->prev = pos;
-                    pos->next = tmp;
-                } else {
-                    tmp->next = NULL;
-                    tmp->prev = pos;
-                    pos->next = tmp;
-                }
-                
-            }
+            tmp->prev = tail->prev;
+            tail->prev->next = tmp;
+            tmp->next = tail;
+            tail->prev = tmp;
         }
+
         device* get() {
-            return head;
-        }
-
-        device* get(int n) {
-            device *tmp;
-            tmp = head;
-            for(int i = 0; i < n; i++) {
-                if (tmp->next != NULL) {
-                    tmp = tmp->next;
-                } else {
-                    device *empty = new device;
-                    empty->isempty = true;
-                    return empty;
-                }
-            }
-            return tmp;
+            return head->next;
         }
 
         int size() {
             int i = 0;
             device *tmp;
-            tmp = head;
-            while (tmp->next != NULL) {
+            tmp = head->next;
+            while (tmp != tail) {     //zähle bis tail erreicht wurde
                 tmp = tmp->next;
                 i++;
             }
@@ -202,21 +162,18 @@ void setup() {
 
 // the loop function runs over and over again forever
 void loop() {
-    //wifi_sniffer_set_channel(channel);
-    //channel = (channel % WIFI_CHANNEL_MAX) + 1;
+    wifi_sniffer_set_channel(channel);
+    channel = (channel % WIFI_CHANNEL_MAX) + 1;
 
     tft.fillScreen(TFT_BLACK);
     tft.setCursor(0,0);
     tft.printf("devices: %d\n", devices.size());
-    /*
-    for (int i = 0; i < devices.size(); i++) {
-        tft.printf("%s rssi: %d\n", devices.get(i)->mac.c_str(), devices.get(i)->rssi);
-    }*/
+    
     device *tmp = devices.get();
-    while (tmp->next != NULL) {
+    while (tmp->next->next != NULL) {
         tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
         tmp = tmp->next;
     }
-    delay(1000);
+    delay(250);
 }
 
