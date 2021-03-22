@@ -1,8 +1,8 @@
-#include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <Button2.h>
 #include <Wire.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 #include "esp_system.h"
@@ -13,9 +13,13 @@
 
 #include <string>
 
-#define LED_GPIO_PIN                     5
-#define WIFI_CHANNEL_SWITCH_INTERVAL  (500)
-#define WIFI_CHANNEL_MAX               (13)
+#define LED_GPIO_PIN                        5
+#define WIFI_CHANNEL_SWITCH_INTERVAL        100
+#define WIFI_CHANNEL_MAX                    13
+#define BUTTON_UP                           35
+#define BUTTON_DOWN                         0
+#define TFT_REFRESH                         100
+#define SCROLLOFF                           16
 
 typedef struct device{
     std::string mac;
@@ -77,9 +81,16 @@ class devicelist {
 
 devicelist devices;
 
-uint8_t level = 0, channel = 1;
 TFT_eSPI tft = TFT_eSPI(135, 240);
+Button2 button_up = Button2(BUTTON_UP);
+Button2 button_down = Button2(BUTTON_DOWN);
+
+int selectedline = 0;
+int scroll;
+uint8_t level = 0, channel = 1;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
+
+
 
 typedef struct {
     unsigned frame_ctrl:16;
@@ -96,17 +107,109 @@ typedef struct {
     uint8_t payload[0];             /* network data ended with 4 bytes csum (CRC32) */
 } wifi_ieee80211_packet_t;
 
-static esp_err_t event_handler(void *ctx, system_event_t *event);
-static void wifi_sniffer_init(void);
-static void wifi_sniffer_set_channel(uint8_t channel);
-static const char *wifi_sniffer_packet_type2str(wifi_promiscuous_pkt_type_t type);
-static void wifi_sniffer_packet_handler(void *buff, wifi_promiscuous_pkt_type_t type);
-
 esp_err_t event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
 
-void wifi_sniffer_init(void) {
+
+const char * packettype2str(wifi_promiscuous_pkt_type_t type) {
+    switch(type) {
+        case WIFI_PKT_MGMT: return "MGMT";
+        case WIFI_PKT_DATA: return "DATA";
+    default:  
+      case WIFI_PKT_MISC: return "MISC";
+    }
+}
+
+static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
+    if (type != WIFI_PKT_MGMT)
+        return;
+
+    const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
+    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
+    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+    
+    char buffer[18];
+    sprintf(buffer, "%02x:%02x:%02x:%02x:%02x:%02x",
+            hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
+            hdr->addr2[3],hdr->addr2[4],hdr->addr2[5] );
+    devices.insert(buffer, ppkt->rx_ctrl.rssi, millis());
+}
+
+void render(void * pvParameter) {
+    int i = 0;                          //counts up after each line
+    while (true) {
+        tft.setCursor(0,0);
+        tft.printf("devices: %d channel: %2d\n", devices.size(), channel);
+
+        device *tmp = devices.get();
+        for (int j = 0; j < scroll; j++) {
+            tmp = tmp->next;
+        }
+        while (tmp->next->next != NULL) {
+            if (i == selectedline - scroll) {
+                tft.textbgcolor = TFT_WHITE;
+                tft.textcolor = TFT_BLACK;
+            }
+            tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
+            tft.textbgcolor = TFT_BLACK;
+            tft.textcolor = TFT_WHITE;
+            tmp = tmp->next;
+            i++;
+        }
+        i = 0;
+        vTaskDelay(TFT_REFRESH / portTICK_RATE_MS);
+    }
+}
+
+void channel_switcher(void * pvParameter) {
+    while (true) {
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        channel = (channel % WIFI_CHANNEL_MAX) + 1;
+
+        vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_RATE_MS);
+    }
+}
+
+void buttonhandler(Button2& btn) {
+    int button;
+    switch (btn.getAttachPin()) {
+        case BUTTON_UP: button = 0; break;
+        case BUTTON_DOWN: button = 1; break;
+        default: return;
+    }
+    switch (btn.getClickType()) {
+        case SINGLE_CLICK: 
+            if (button) {
+                if (selectedline < devices.size() - 1) {
+                    selectedline++;
+                    if (scroll + SCROLLOFF - 1 < selectedline) {
+                        scroll++;
+                    }
+                } else {
+                    selectedline = 0;
+                    scroll = 0;
+                }
+            } else {
+                if (selectedline != 0) {
+                    selectedline--;
+                    if (selectedline == scroll - 1) {
+                        scroll--;
+                    }
+                } else {
+                    selectedline = devices.size() - 1;
+                    scroll = devices.size() - SCROLLOFF;
+                }
+            }
+            break;
+        case LONG_CLICK: 
+            break;
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    
     nvs_flash_init();
     tcpip_adapter_init();
     ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
@@ -117,63 +220,22 @@ void wifi_sniffer_init(void) {
     ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_NULL) );               //Weder AP noch Station
     ESP_ERROR_CHECK( esp_wifi_start() );
     esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(&wifi_sniffer_packet_handler);
-}
-
-void wifi_sniffer_set_channel(uint8_t channel) {
-    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
-}
-
-const char * wifi_sniffer_packet_type2str(wifi_promiscuous_pkt_type_t type) {
-    switch(type) {
-        case WIFI_PKT_MGMT: return "MGMT";
-        case WIFI_PKT_DATA: return "DATA";
-    default:  
-      case WIFI_PKT_MISC: return "MISC";
-    }
-}
-
-void wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
-    if (type != WIFI_PKT_MGMT)
-        return;
-
-    const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
-    const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
-    const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+    esp_wifi_set_promiscuous_rx_cb(&packet_handler);
     
-    char buffer[18];
-    sprintf(buffer,   "%02x:%02x:%02x:%02x:%02x:%02x",
-                            hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
-                            hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]
-                        );
-    devices.insert(buffer, ppkt->rx_ctrl.rssi, millis());
-}
-
-// the setup function runs once when you press reset or power the board
-void setup() {
-    Serial.begin(115200);
-    delay(10);
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
+
+    button_up.setClickHandler(buttonhandler);
+    button_up.setLongClickHandler(buttonhandler);
+    button_down.setClickHandler(buttonhandler);
+    button_down.setLongClickHandler(buttonhandler);
     
-    wifi_sniffer_init();
+    xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);
+    xTaskCreate(&render, "render", 2048, NULL, 5, NULL);
 }
 
-// the loop function runs over and over again forever
 void loop() {
-    wifi_sniffer_set_channel(channel);
-    channel = (channel % WIFI_CHANNEL_MAX) + 1;
-
-    tft.fillScreen(TFT_BLACK);
-    tft.setCursor(0,0);
-    tft.printf("devices: %d\n", devices.size());
-    
-    device *tmp = devices.get();
-    while (tmp->next->next != NULL) {
-        tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
-        tmp = tmp->next;
-    }
-    delay(250);
+    button_up.loop();
+    button_down.loop();
 }
-
