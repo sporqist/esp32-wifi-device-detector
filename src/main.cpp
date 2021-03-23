@@ -117,6 +117,23 @@ bool existsinwatchlist(std::string mac) {
     return (it != watchlist.end());
 }
 
+bool hl = false;
+void texthl(bool highlight) {
+    if (highlight) {
+        tft.textbgcolor = TFT_WHITE;
+        tft.textcolor = TFT_BLACK;
+        hl = true;
+    } else {
+        tft.textbgcolor = TFT_BLACK;
+        tft.textcolor = TFT_WHITE;
+        hl = false;
+    }
+}
+
+bool texthl() {
+    return hl;
+}
+
 typedef struct {
     unsigned frame_ctrl:16;
     unsigned duration_id:16;
@@ -164,8 +181,8 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
 void render(void * pvParameter) {
     int i = 0;                          //counts up after each line
     while (true) {
-        tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 6, TFT_BLACK);     //overwrite area for new bar
-        tft.fillRect(0, 0, channel * 2, 6, TFT_WHITE);              //loading bar driven by wifi channel switch
+        tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 7, TFT_BLACK);     //overwrite area for new bar
+        tft.fillRect(0, 0, channel * 2, 7, TFT_WHITE);              //loading bar driven by wifi channel switch
         tft.setCursor(30, 0);
         tft.printf("devices %d line %3d - %-3d", devices.size(), scroll + 1, selectedline + 1);
 
@@ -182,24 +199,36 @@ void render(void * pvParameter) {
 
         while (tmp->next->next != NULL) {
             if (mode == NORMAL) {
-                if (i == selectedline - scroll) {       //highlight selected line
-                    tft.textbgcolor = TFT_WHITE;
-                    tft.textcolor = TFT_BLACK;
+                if (i == selectedline - scroll) {
+                    texthl(true);
                 }
-                tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
+                tft.printf("%s rssi: %-4d ", tmp->mac.c_str(), tmp->rssi);
+                if (existsinwatchlist(tmp->mac)) {
+                    tft.print("//");
+                }
+                if (texthl()) {
+                    tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_WHITE);
+                } else {
+                    tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_BLACK);
+                }
+                tft.println();
                 i++;
             } else if (mode == WATCHLIST) {
                 if (existsinwatchlist(tmp->mac)) {
-                    if (i == selectedline - scroll) {       //highlight selected line
-                        tft.textbgcolor = TFT_WHITE;
-                        tft.textcolor = TFT_BLACK;
+                    if (i == selectedline - scroll) {
+                        texthl(true);
                     }
-                    tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
+                    tft.printf("%s last pkt: %ds ago", tmp->mac.c_str(), (millis() - tmp->timestamp) / 1000);
+                    if (texthl()) {
+                        tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_WHITE);
+                    } else {
+                        tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_BLACK);
+                    }
+                    tft.println();
                     i++;
                 }
             }
-            tft.textbgcolor = TFT_BLACK;
-            tft.textcolor = TFT_WHITE;
+            texthl(false);
             tmp = tmp->next;
         }
         tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, TFT_HEIGHT - tft.getCursorY(), TFT_BLACK);
@@ -267,16 +296,20 @@ void buttonhandler(Button2& btn) {
                     mode = NORMAL;
                 }
             } else {        //UP
-                device *tmp;
-                tmp = devices.get();
-                for (int i = 0; i < selectedline; i++) {
-                    tmp = tmp->next;
+                if (mode == NORMAL) {
+                    device *tmp;
+                    tmp = devices.get();
+                    for (int i = 0; i < selectedline; i++) {
+                        tmp = tmp->next;
+                    }
+                    if (!existsinwatchlist(tmp->mac)) {
+                        watchlist.push_back(tmp->mac);
+                    } else {
+                        watchlist.remove(tmp->mac);
+                    }
+                } else if (mode == WATCHLIST) {
                 }
-                if (!existsinwatchlist(tmp->mac)) {
-                    watchlist.push_back(tmp->mac);
-                } else {
-                    watchlist.remove(tmp->mac);
-                }
+                
             }
             break;
         default: return;
