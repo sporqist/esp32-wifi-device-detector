@@ -10,6 +10,8 @@
 #include "esp_event_loop.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
+#include "sdkconfig.h"
+#include "EEPROM.h"
 
 #include <string>
 
@@ -79,7 +81,11 @@ class devicelist {
         }
 };
 
+enum Modi {NORMAL, WATCHLIST};
+Modi mode = NORMAL;
+
 devicelist devices;
+devicelist watchlist;
 
 TFT_eSPI tft = TFT_eSPI(135, 240);
 Button2 button_up = Button2(BUTTON_UP);
@@ -89,8 +95,6 @@ int selectedline = 0;
 int scroll;
 uint8_t level = 0, channel = 1;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
-
-
 
 typedef struct {
     unsigned frame_ctrl:16;
@@ -139,15 +143,22 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
 void render(void * pvParameter) {
     int i = 0;                          //counts up after each line
     while (true) {
-        tft.setCursor(0,0);
-        tft.printf("devices: %d channel: %2d\n", devices.size(), channel);
+        tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 6, TFT_BLACK);     //overwrite area for new bar
+        tft.fillRect(0, 0, channel * 2, 6, TFT_WHITE);              //loading bar driven by wifi channel switch
+        tft.setCursor(30, 0);
+        tft.printf("devices %d line %3d - %d   ", devices.size(), scroll + 1, selectedline + 1);
 
-        device *tmp = devices.get();
+        device *tmp;
+        switch (mode) {
+            case NORMAL: tmp = devices.get(); tft.println("NORMAL"); break;
+            case WATCHLIST: tmp = watchlist.get(); tft.println("WATCHLIST"); break;
+        }
+
         for (int j = 0; j < scroll; j++) {
             tmp = tmp->next;
         }
         while (tmp->next->next != NULL) {
-            if (i == selectedline - scroll) {
+            if (i == selectedline - scroll) {       //highlight selected line
                 tft.textbgcolor = TFT_WHITE;
                 tft.textcolor = TFT_BLACK;
             }
@@ -180,7 +191,7 @@ void buttonhandler(Button2& btn) {
     }
     switch (btn.getClickType()) {
         case SINGLE_CLICK: 
-            if (button) {
+            if (button) {   //UP
                 if (selectedline < devices.size() - 1) {
                     selectedline++;
                     if (scroll + SCROLLOFF - 1 < selectedline) {
@@ -190,7 +201,7 @@ void buttonhandler(Button2& btn) {
                     selectedline = 0;
                     scroll = 0;
                 }
-            } else {
+            } else {        //DOWN
                 if (selectedline != 0) {
                     selectedline--;
                     if (selectedline == scroll - 1) {
@@ -198,11 +209,24 @@ void buttonhandler(Button2& btn) {
                     }
                 } else {
                     selectedline = devices.size() - 1;
-                    scroll = devices.size() - SCROLLOFF;
+                    if (selectedline >= SCROLLOFF) {
+                        scroll = devices.size() - SCROLLOFF;
+                    }
                 }
             }
             break;
-        case LONG_CLICK: 
+        case LONG_CLICK:
+            if (button) {   //UP
+                scroll = 0;
+                selectedline = 0;
+                if (mode == NORMAL) { 
+                    mode = WATCHLIST;
+                } else {
+                    mode = NORMAL;
+                }
+            } else {        //DOWN
+
+            }
             break;
     }
 }
@@ -230,8 +254,13 @@ void setup() {
     button_up.setLongClickHandler(buttonhandler);
     button_down.setClickHandler(buttonhandler);
     button_down.setLongClickHandler(buttonhandler);
+    button_up.setDoubleClickTime(100);
+    button_down.setDoubleClickTime(100);
+    button_up.setLongClickTime(500);
+    button_down.setLongClickTime(500);
     
-    xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);
+    
+    xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);   //
     xTaskCreate(&render, "render", 2048, NULL, 5, NULL);
 }
 
