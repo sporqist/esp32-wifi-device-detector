@@ -14,14 +14,17 @@
 #include "EEPROM.h"
 
 #include <string>
+#include <list>
 
-#define LED_GPIO_PIN                        5
 #define WIFI_CHANNEL_SWITCH_INTERVAL        100
 #define WIFI_CHANNEL_MAX                    13
 #define BUTTON_UP                           35
 #define BUTTON_DOWN                         0
 #define TFT_REFRESH                         100
 #define SCROLLOFF                           16
+
+#define TFT_WIDTH                           240
+#define TFT_HEIGHT                          135
 
 typedef struct device{
     std::string mac;
@@ -79,15 +82,27 @@ class devicelist {
             }
             return i;
         }
+
+        device* get(std::string mac) {
+            device *tmp;
+            tmp = head->next;
+            while (tmp != tail) {
+                if (tmp->mac.compare(mac) == 0) {
+                    return tmp;
+                }
+                tmp = tmp->next;
+            }
+            return NULL;
+        }
 };
 
 enum Modi {NORMAL, WATCHLIST};
 Modi mode = NORMAL;
 
 devicelist devices;
-devicelist watchlist;
+std::list<std::string> watchlist;
 
-TFT_eSPI tft = TFT_eSPI(135, 240);
+TFT_eSPI tft = TFT_eSPI(TFT_HEIGHT, TFT_WIDTH);
 Button2 button_up = Button2(BUTTON_UP);
 Button2 button_down = Button2(BUTTON_DOWN);
 
@@ -95,6 +110,12 @@ int selectedline = 0;
 int scroll;
 uint8_t level = 0, channel = 1;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
+
+bool existsinwatchlist(std::string mac) {
+    std::list<std::string>::iterator it;
+    it = std::find(watchlist.begin(), watchlist.end(), mac);
+    return (it != watchlist.end());
+}
 
 typedef struct {
     unsigned frame_ctrl:16;
@@ -136,7 +157,7 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     char buffer[18];
     sprintf(buffer, "%02x:%02x:%02x:%02x:%02x:%02x",
             hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
-            hdr->addr2[3],hdr->addr2[4],hdr->addr2[5] );
+            hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]);
     devices.insert(buffer, ppkt->rx_ctrl.rssi, millis());
 }
 
@@ -146,32 +167,47 @@ void render(void * pvParameter) {
         tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 6, TFT_BLACK);     //overwrite area for new bar
         tft.fillRect(0, 0, channel * 2, 6, TFT_WHITE);              //loading bar driven by wifi channel switch
         tft.setCursor(30, 0);
-        tft.printf("devices %d line %3d - %d   ", devices.size(), scroll + 1, selectedline + 1);
+        tft.printf("devices %d line %3d - %-3d", devices.size(), scroll + 1, selectedline + 1);
 
-        device *tmp;
         switch (mode) {
-            case NORMAL: tmp = devices.get(); tft.println("NORMAL"); break;
-            case WATCHLIST: tmp = watchlist.get(); tft.println("WATCHLIST"); break;
+            case NORMAL:  tft.println("   NORMAL"); break;
+            case WATCHLIST: tft.println("WATCHLIST"); break;
         }
-
+        device *tmp;
+        tmp = devices.get();
+        
         for (int j = 0; j < scroll; j++) {
             tmp = tmp->next;
         }
+
         while (tmp->next->next != NULL) {
-            if (i == selectedline - scroll) {       //highlight selected line
-                tft.textbgcolor = TFT_WHITE;
-                tft.textcolor = TFT_BLACK;
+            if (mode == NORMAL) {
+                if (i == selectedline - scroll) {       //highlight selected line
+                    tft.textbgcolor = TFT_WHITE;
+                    tft.textcolor = TFT_BLACK;
+                }
+                tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
+                i++;
+            } else if (mode == WATCHLIST) {
+                if (existsinwatchlist(tmp->mac)) {
+                    if (i == selectedline - scroll) {       //highlight selected line
+                        tft.textbgcolor = TFT_WHITE;
+                        tft.textcolor = TFT_BLACK;
+                    }
+                    tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
+                    i++;
+                }
             }
-            tft.printf("%s rssi: %d\n", tmp->mac.c_str(), tmp->rssi);
             tft.textbgcolor = TFT_BLACK;
             tft.textcolor = TFT_WHITE;
             tmp = tmp->next;
-            i++;
         }
+        tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, TFT_HEIGHT - tft.getCursorY(), TFT_BLACK);
         i = 0;
         vTaskDelay(TFT_REFRESH / portTICK_RATE_MS);
     }
 }
+
 
 void channel_switcher(void * pvParameter) {
     while (true) {
@@ -184,6 +220,12 @@ void channel_switcher(void * pvParameter) {
 
 void buttonhandler(Button2& btn) {
     int button;
+    int listsize;
+    switch (mode) {
+        case NORMAL: listsize = devices.size(); break;
+        case WATCHLIST: listsize = watchlist.size(); break;
+        default: return;
+    }
     switch (btn.getAttachPin()) {
         case BUTTON_UP: button = 0; break;
         case BUTTON_DOWN: button = 1; break;
@@ -191,8 +233,8 @@ void buttonhandler(Button2& btn) {
     }
     switch (btn.getClickType()) {
         case SINGLE_CLICK: 
-            if (button) {   //UP
-                if (selectedline < devices.size() - 1) {
+            if (button) {   //DOWN
+                if (selectedline < listsize - 1) {
                     selectedline++;
                     if (scroll + SCROLLOFF - 1 < selectedline) {
                         scroll++;
@@ -201,22 +243,22 @@ void buttonhandler(Button2& btn) {
                     selectedline = 0;
                     scroll = 0;
                 }
-            } else {        //DOWN
+            } else {        //UP
                 if (selectedline != 0) {
                     selectedline--;
                     if (selectedline == scroll - 1) {
                         scroll--;
                     }
                 } else {
-                    selectedline = devices.size() - 1;
+                    selectedline = listsize - 1;
                     if (selectedline >= SCROLLOFF) {
-                        scroll = devices.size() - SCROLLOFF;
+                        scroll = listsize - SCROLLOFF;
                     }
                 }
             }
             break;
         case LONG_CLICK:
-            if (button) {   //UP
+            if (button) {   //DOWN
                 scroll = 0;
                 selectedline = 0;
                 if (mode == NORMAL) { 
@@ -224,10 +266,20 @@ void buttonhandler(Button2& btn) {
                 } else {
                     mode = NORMAL;
                 }
-            } else {        //DOWN
-
+            } else {        //UP
+                device *tmp;
+                tmp = devices.get();
+                for (int i = 0; i < selectedline; i++) {
+                    tmp = tmp->next;
+                }
+                if (!existsinwatchlist(tmp->mac)) {
+                    watchlist.push_back(tmp->mac);
+                } else {
+                    watchlist.remove(tmp->mac);
+                }
             }
             break;
+        default: return;
     }
 }
 
@@ -249,6 +301,7 @@ void setup() {
     tft.init();
     tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
+    tft.setTextWrap(false, false);
 
     button_up.setClickHandler(buttonhandler);
     button_up.setLongClickHandler(buttonhandler);
