@@ -11,10 +11,11 @@
 #include "nvs_flash.h"
 #include "driver/gpio.h"
 #include "sdkconfig.h"
-#include "EEPROM.h"
 
 #include <string>
 #include <list>
+
+#include "devicelist.h"
 
 #define WIFI_CHANNEL_SWITCH_INTERVAL        100
 #define WIFI_CHANNEL_MAX                    13
@@ -25,76 +26,6 @@
 
 #define TFT_WIDTH                           240
 #define TFT_HEIGHT                          135
-
-typedef struct device{
-    std::string mac;
-    int rssi;
-    int timestamp;
-    device *next;
-    device *prev;
-} device;
-
-class devicelist {
-
-    private:
-        device *head, *tail;
-
-    public:
-        devicelist() {
-            head = new device;
-            tail = new device;
-            head->next = tail;
-            tail->prev = head;
-        }
-
-        void insert(std::string mac, int rssi, int timestamp) {
-            device *pos = head->next;
-            while (pos != tail) {
-                if (pos->mac.compare(mac) == 0) {
-                    pos->rssi = rssi;
-                    pos->timestamp = timestamp;
-                    return;
-                }
-                pos = pos->next;
-            }
-            device *tmp = new device;
-            tmp->mac = mac;
-            tmp->rssi = rssi;
-            tmp->timestamp = timestamp;
-
-            tmp->prev = tail->prev;
-            tail->prev->next = tmp;
-            tmp->next = tail;
-            tail->prev = tmp;
-        }
-
-        device* get() {
-            return head->next;
-        }
-
-        int size() {
-            int i = 0;
-            device *tmp;
-            tmp = head->next;
-            while (tmp != tail) {     //zähle bis tail erreicht wurde
-                tmp = tmp->next;
-                i++;
-            }
-            return i;
-        }
-
-        device* get(std::string mac) {
-            device *tmp;
-            tmp = head->next;
-            while (tmp != tail) {
-                if (tmp->mac.compare(mac) == 0) {
-                    return tmp;
-                }
-                tmp = tmp->next;
-            }
-            return NULL;
-        }
-};
 
 enum Modi {NORMAL, WATCHLIST};
 Modi mode = NORMAL;
