@@ -1,8 +1,7 @@
 #include <TFT_eSPI.h>
 #include <Button2.h>
 #include <Wire.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include <FreeRTOS.h>
 #include "esp_wifi.h"
 #include "esp_wifi_types.h"
 #include "esp_system.h"
@@ -36,6 +35,7 @@ std::list<std::string> watchlist;
 TFT_eSPI tft = TFT_eSPI(TFT_HEIGHT, TFT_WIDTH);
 Button2 button_up = Button2(BUTTON_UP);
 Button2 button_down = Button2(BUTTON_DOWN);
+//SemaphoreHandle_t buttonsemaphore;
 
 int selectedline = 0;
 int scroll;
@@ -106,7 +106,7 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     sprintf(buffer, "%02x:%02x:%02x:%02x:%02x:%02x",
             hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
             hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]);
-    devices.insert(buffer, ppkt->rx_ctrl.rssi, millis());
+    devices.insert(buffer, ppkt->rx_ctrl.rssi, xTaskGetTickCount());
 }
 
 void render(void * pvParameter) {
@@ -128,14 +128,22 @@ void render(void * pvParameter) {
             tmp = tmp->next;
         }
 
+        uint32_t time = xTaskGetTickCount();
+
         while (tmp->next->next != NULL) {
             if (mode == NORMAL) {
                 if (i == selectedline - scroll) {
                     texthl(true);
                 }
-                tft.printf("%s rssi: %-4d ", tmp->mac.c_str(), tmp->rssi);
                 if (existsinwatchlist(tmp->mac)) {
-                    tft.print("//");
+                    tft.print("|| ");
+                } else {
+                    tft.print("   ");
+                }
+                if ((time - tmp->timestamp) / 1000 < 60 && time < tmp->timestamp) {
+                    tft.printf("%s    rssi: %-4d", tmp->mac.c_str(), tmp->rssi);
+                } else {
+                    tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
                 }
                 if (texthl()) {
                     tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_WHITE);
@@ -149,7 +157,7 @@ void render(void * pvParameter) {
                     if (i == selectedline - scroll) {
                         texthl(true);
                     }
-                    tft.printf("%s last pkt: %ds ago", tmp->mac.c_str(), (millis() - tmp->timestamp) / 1000);
+                    tft.printf("%s last pkt: %ds ago", tmp->mac.c_str(), (time - tmp->timestamp) / 1000);
                     if (texthl()) {
                         tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_WHITE);
                     } else {
@@ -167,7 +175,6 @@ void render(void * pvParameter) {
         vTaskDelay(TFT_REFRESH / portTICK_RATE_MS);
     }
 }
-
 
 void channel_switcher(void * pvParameter) {
     while (true) {
@@ -246,7 +253,14 @@ void buttonhandler(Button2& btn) {
         default: return;
     }
 }
-
+/*
+void buttons(uint8_t gpio, void * args, uint8_t param) {
+    switch (param) {
+        case 0: Serial.println("UP");
+        case 1: Serial.println("DOWN");
+    }
+}
+*/
 void setup() {
     Serial.begin(115200);
     
@@ -275,9 +289,12 @@ void setup() {
     button_down.setDoubleClickTime(100);
     button_up.setLongClickTime(500);
     button_down.setLongClickTime(500);
-    
-    
-    xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);   //
+
+    //buttonsemaphore = xSemaphoreCreateBinary();
+
+
+    //xTaskCreate(&buttons, "button listener", 512, NULL, 5, NULL);
+    xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);
     xTaskCreate(&render, "render", 2048, NULL, 5, NULL);
 }
 
