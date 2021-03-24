@@ -128,8 +128,6 @@ void render(void * pvParameter) {
             tmp = tmp->next;
         }
 
-        uint32_t time = xTaskGetTickCount();
-
         while (tmp->next->next != NULL) {
             if (mode == NORMAL) {
                 if (i == selectedline - scroll) {
@@ -140,7 +138,7 @@ void render(void * pvParameter) {
                 } else {
                     tft.print("   ");
                 }
-                if ((time - tmp->timestamp) / 1000 < 60 && time < tmp->timestamp) {
+                if ((xTaskGetTickCount() - tmp->timestamp) / 1000 < 60) {
                     tft.printf("%s    rssi: %-4d", tmp->mac.c_str(), tmp->rssi);
                 } else {
                     tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
@@ -157,7 +155,7 @@ void render(void * pvParameter) {
                     if (i == selectedline - scroll) {
                         texthl(true);
                     }
-                    tft.printf("%s last pkt: %ds ago", tmp->mac.c_str(), (time - tmp->timestamp) / 1000);
+                    tft.printf("%s last pkt: %ds ago", tmp->mac.c_str(), (xTaskGetTickCount() - tmp->timestamp) / 1000);
                     if (texthl()) {
                         tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_WHITE);
                     } else {
