@@ -16,15 +16,18 @@
 
 #include "devicelist.h"
 
-#define WIFI_CHANNEL_SWITCH_INTERVAL        300
+#define WIFI_CHANNEL_SWITCH_INTERVAL        250
+#define TFT_REFRESH                         250
+
 #define WIFI_CHANNEL_MAX                    13
 #define BUTTON_UP                           35
 #define BUTTON_DOWN                         0
-#define TFT_REFRESH                         250
-#define SCROLLOFF                           16
 
 #define TFT_WIDTH                           240
 #define TFT_HEIGHT                          135
+
+static const int normalmode_lines = 15;
+static const int watchlistmode_lines = 10;
 
 enum Modi {NORMAL, WATCHLIST};
 Modi mode = NORMAL;
@@ -37,12 +40,13 @@ Button2 button_up = Button2(BUTTON_UP);
 Button2 button_down = Button2(BUTTON_DOWN);
 //SemaphoreHandle_t buttonsemaphore;
 
-double pps = 0;
-int pps_buffer = 0;
+static float pps = 0;
+static int pps_buffer[10] = { 0 };
+static int devices_online = 0;
 
-int selectedline = 0;
-int scroll = 0;
-uint8_t level = 0, channel = 1;
+static int selectedline = 0;
+static int scroll = 0;
+static uint8_t level = 0, channel = 1;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
 
 bool existsinwatchlist(std::string mac) {
@@ -87,7 +91,7 @@ esp_err_t event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
 
-const char * packettype2str(wifi_promiscuous_pkt_type_t type) {
+static const char * packettype2str(wifi_promiscuous_pkt_type_t type) {
     switch(type) {
         case WIFI_PKT_MGMT: return "MGMT";
         case WIFI_PKT_DATA: return "DATA";
@@ -96,23 +100,55 @@ const char * packettype2str(wifi_promiscuous_pkt_type_t type) {
     }
 }
 
-void pps_counter(void * pvParameter) {
+static void pps_counter(void * pvParameter) {
     TickType_t prevWakeTime;
-    const TickType_t frequency = 1000;
-    prevWakeTime = xTaskGetTickCount();
+    const TickType_t frequency = 1000;          //every second
+    prevWakeTime = xTaskGetTickCount(); 
     while (true) {
-        pps = pps_buffer;
-        pps_buffer = 0;
+        float tmp = 0;
+        for (int i = 0; i < 9; i++) {
+            tmp += pps_buffer[i];
+            pps_buffer[i] = pps_buffer[i + 1];
+        }
+        tmp = tmp + pps_buffer[9];
+        pps_buffer[9] = 0;
+        pps = tmp / 10;
+
         vTaskDelayUntil(&prevWakeTime, frequency);
     }
 }
 
-void channel_switcher(void * pvParameter) {
+static void online_counter(void * pvParameter) {
+    TickType_t prevWakeTime;
+    const TickType_t frequency = 1000;         //every secone
+    prevWakeTime = xTaskGetTickCount();
+
+    while (true) {
+        int online_tmp = 0;
+        device* tmp;
+        tmp = devices.get();
+        while (tmp->next->next != NULL) {
+            if ((xTaskGetTickCount() - tmp->timestamp) / 1000 < 60) {
+                online_tmp++;
+            }
+            tmp = tmp->next;
+        }
+        devices_online = online_tmp;
+
+        vTaskDelayUntil(&prevWakeTime, frequency);
+    }    
+}
+
+static void channel_switcher(void * pvParameter) {
+    TickType_t prevWakeTime;
+    const TickType_t frequency = WIFI_CHANNEL_SWITCH_INTERVAL;
+    prevWakeTime = xTaskGetTickCount();
+    
     while (true) {
         esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
         channel = (channel % WIFI_CHANNEL_MAX) + 1;
 
-        vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_RATE_MS);
+        vTaskDelayUntil(&prevWakeTime, frequency);
     }
 }
 
@@ -129,11 +165,16 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
             hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
             hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]);
     devices.insert(buffer, ppkt->rx_ctrl.rssi, xTaskGetTickCount());
-    pps_buffer++;
+    pps_buffer[9]++;
 }
 
 void render(void * pvParameter) {
+    TickType_t prevWakeTime;
+    const TickType_t frequency = TFT_REFRESH;         //every secone
+    prevWakeTime = xTaskGetTickCount();
+    
     int i = 0;                          //counts up after each line
+    int scrolloff;
     while (true) {
         tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 7, TFT_BLACK);     //overwrite area for new bar
         tft.fillRect(0, 0, channel * 2, 7, TFT_WHITE);              //loading bar driven by wifi channel switch
@@ -141,8 +182,14 @@ void render(void * pvParameter) {
         tft.printf("devices %d line %3d - %-3d", devices.size(), scroll + 1, selectedline + 1);
 
         switch (mode) {
-            case NORMAL:  tft.println("   NORMAL"); break;
-            case WATCHLIST: tft.println("WATCHLIST"); break;
+            case NORMAL:  
+                tft.println("   NORMAL"); 
+                scrolloff = normalmode_lines;
+                break;
+            case WATCHLIST: 
+                tft.println("WATCHLIST"); 
+                scrolloff = watchlistmode_lines;
+                break;
         }
         device *tmp;
         tmp = devices.get();
@@ -151,7 +198,7 @@ void render(void * pvParameter) {
             tmp = tmp->next;
         }
 
-        while (tmp->next->next != NULL && i < SCROLLOFF) {
+        while (tmp->next->next != NULL && i < scrolloff) {
             if (mode == NORMAL) {
                 if (i == selectedline - scroll) {
                     texthl(true);
@@ -196,31 +243,42 @@ void render(void * pvParameter) {
             texthl(false);
             tmp = tmp->next;
         }
+        while (i < 15) {
+            tft.println();
+            i++;
+        }
+        tft.printf("online: %3d pps: %5.1f\n", devices_online, pps);
         tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, TFT_HEIGHT - tft.getCursorY(), TFT_BLACK);
         i = 0;
-        vTaskDelay(TFT_REFRESH / portTICK_RATE_MS);
+
+        vTaskDelayUntil(&prevWakeTime, frequency);
     }
 }
 
 void buttonhandler(Button2& btn) {
     int button;
     int listsize;
+    int scrolloff;
     switch (mode) {
-        case NORMAL: listsize = devices.size(); break;
-        case WATCHLIST: listsize = watchlist.size(); break;
-        default: return;
+        case NORMAL: 
+            listsize = devices.size(); 
+            scrolloff = normalmode_lines;
+            break;
+        case WATCHLIST: 
+            listsize = watchlist.size(); 
+            scrolloff = watchlistmode_lines;
+            break;
     }
     switch (btn.getAttachPin()) {
         case BUTTON_UP: button = 0; break;
         case BUTTON_DOWN: button = 1; break;
-        default: return;
     }
     switch (btn.getClickType()) {
         case SINGLE_CLICK: 
             if (button) {   //DOWN
                 if (selectedline < listsize - 1) {
                     selectedline++;
-                    if (scroll + SCROLLOFF - 1 < selectedline) {
+                    if (scroll + scrolloff - 1 < selectedline) {
                         scroll++;
                     }
                 } else {
@@ -235,8 +293,8 @@ void buttonhandler(Button2& btn) {
                     }
                 } else {
                     selectedline = listsize - 1;
-                    if (selectedline >= SCROLLOFF) {
-                        scroll = listsize - SCROLLOFF;
+                    if (selectedline >= scrolloff) {
+                        scroll = listsize - scrolloff;
                     }
                 }
             }
@@ -267,7 +325,6 @@ void buttonhandler(Button2& btn) {
                 
             }
             break;
-        default: return;
     }
 }
 /*
@@ -312,6 +369,7 @@ void setup() {
 
     //xTaskCreate(&buttons, "button listener", 512, NULL, 5, NULL);
     xTaskCreate(&pps_counter, "pps_counter", 512, NULL, 7, NULL);
+    xTaskCreate(&online_counter, "pps_counter", 512, NULL, 7, NULL);
     xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);
     xTaskCreate(&render, "render", 2048, NULL, 6, NULL);
 }
