@@ -5,9 +5,8 @@
 typedef struct device {
     std::string mac;
     int rssi;
-    int timestamp;
+    uint32_t timestamp;
     uint8_t channel;
-
     device *next;
     device *prev;
 } device;
