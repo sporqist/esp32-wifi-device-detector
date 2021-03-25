@@ -254,10 +254,11 @@ void render(void * pvParameter) {
                     tft.println();
                     i++;
                 }
-                tft.printf("channel: %-2d", selected->channel);
+                tft.printf("channel: %-2d\n", selected->channel);
                 break;
         }
         while (i < 15) {
+            tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, 8, TFT_BLACK);
             tft.println();
             i++;
         }
