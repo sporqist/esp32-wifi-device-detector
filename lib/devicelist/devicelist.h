@@ -6,6 +6,8 @@ typedef struct device {
     std::string mac;
     int rssi;
     int timestamp;
+    uint8_t channel;
+
     device *next;
     device *prev;
 } device;
@@ -17,7 +19,7 @@ class devicelist {
     public:
         devicelist();
         
-        void insert(std::string mac, int rssi, int timestamp);
+        void insert(std::string mac, int rssi, uint32_t timestamp, uint8_t channel);
 
         device* get();
 

@@ -46,7 +46,7 @@ static int devices_online = 0;
 
 static int selectedline = 0;
 static int scroll = 0;
-static uint8_t level = 0, channel = 1;
+static uint8_t channel = 1;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
 
 bool existsinwatchlist(std::string mac) {
@@ -56,6 +56,8 @@ bool existsinwatchlist(std::string mac) {
 }
 
 bool hl = false;
+bool texthl() { return hl; }
+
 void texthl(bool highlight) {
     if (highlight) {
         tft.textbgcolor = TFT_WHITE;
@@ -68,9 +70,6 @@ void texthl(bool highlight) {
     }
 }
 
-bool texthl() {
-    return hl;
-}
 
 typedef struct {
     unsigned frame_ctrl:16;
@@ -164,7 +163,7 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     sprintf(buffer, "%02x:%02x:%02x:%02x:%02x:%02x",
             hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
             hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]);
-    devices.insert(buffer, ppkt->rx_ctrl.rssi, xTaskGetTickCount());
+    devices.insert(buffer, ppkt->rx_ctrl.rssi, xTaskGetTickCount(), channel);
     pps_buffer[9]++;
 }
 
@@ -198,9 +197,11 @@ void render(void * pvParameter) {
             tmp = tmp->next;
         }
 
+        device *selected;
         while (tmp->next->next != NULL && i < scrolloff) {
             if (mode == NORMAL) {
                 if (i == selectedline - scroll) {
+                    selected = tmp;
                     texthl(true);
                 }
                 if (existsinwatchlist(tmp->mac)) {
@@ -223,6 +224,7 @@ void render(void * pvParameter) {
             } else if (mode == WATCHLIST) {
                 if (existsinwatchlist(tmp->mac)) {
                     if (i == selectedline - scroll) {
+                        selected = tmp;
                         texthl(true);
                     }
                     if ((xTaskGetTickCount() - tmp->timestamp) / 1000 < 60) {
@@ -242,6 +244,18 @@ void render(void * pvParameter) {
             }
             texthl(false);
             tmp = tmp->next;
+        }
+        switch (mode) {
+            case NORMAL:
+                break;
+            case WATCHLIST:
+                while (i < watchlistmode_lines) {
+                    tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, 8, TFT_BLACK);
+                    tft.println();
+                    i++;
+                }
+                tft.printf("channel: %-2d", selected->channel);
+                break;
         }
         while (i < 15) {
             tft.println();

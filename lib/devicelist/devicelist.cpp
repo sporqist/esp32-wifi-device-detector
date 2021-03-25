@@ -8,12 +8,13 @@ devicelist::devicelist() {
     tail->prev = head;
 }
 
-void devicelist::insert(std::string mac, int rssi, int timestamp) {
+void devicelist::insert(std::string mac, int rssi, uint32_t timestamp, uint8_t channel) {
     device *pos = head->next;
     while (pos != tail) {
         if (pos->mac.compare(mac) == 0) {
             pos->rssi = rssi;
             pos->timestamp = timestamp;
+            pos->channel = channel;
             return;
         }
         pos = pos->next;
@@ -22,6 +23,7 @@ void devicelist::insert(std::string mac, int rssi, int timestamp) {
     tmp->mac = mac;
     tmp->rssi = rssi;
     tmp->timestamp = timestamp;
+    tmp->channel = channel;
 
     tmp->prev = tail->prev;
     tail->prev->next = tmp;
