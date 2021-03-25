@@ -16,11 +16,11 @@
 
 #include "devicelist.h"
 
-#define WIFI_CHANNEL_SWITCH_INTERVAL        100
+#define WIFI_CHANNEL_SWITCH_INTERVAL        300
 #define WIFI_CHANNEL_MAX                    13
 #define BUTTON_UP                           35
 #define BUTTON_DOWN                         0
-#define TFT_REFRESH                         100
+#define TFT_REFRESH                         250
 #define SCROLLOFF                           16
 
 #define TFT_WIDTH                           240
@@ -37,8 +37,11 @@ Button2 button_up = Button2(BUTTON_UP);
 Button2 button_down = Button2(BUTTON_DOWN);
 //SemaphoreHandle_t buttonsemaphore;
 
+double pps = 0;
+int pps_buffer = 0;
+
 int selectedline = 0;
-int scroll;
+int scroll = 0;
 uint8_t level = 0, channel = 1;
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
 
@@ -84,13 +87,32 @@ esp_err_t event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
 
-
 const char * packettype2str(wifi_promiscuous_pkt_type_t type) {
     switch(type) {
         case WIFI_PKT_MGMT: return "MGMT";
         case WIFI_PKT_DATA: return "DATA";
     default:  
       case WIFI_PKT_MISC: return "MISC";
+    }
+}
+
+void pps_counter(void * pvParameter) {
+    TickType_t prevWakeTime;
+    const TickType_t frequency = 1000;
+    prevWakeTime = xTaskGetTickCount();
+    while (true) {
+        pps = pps_buffer;
+        pps_buffer = 0;
+        vTaskDelayUntil(&prevWakeTime, frequency);
+    }
+}
+
+void channel_switcher(void * pvParameter) {
+    while (true) {
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        channel = (channel % WIFI_CHANNEL_MAX) + 1;
+
+        vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_RATE_MS);
     }
 }
 
@@ -107,6 +129,7 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
             hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
             hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]);
     devices.insert(buffer, ppkt->rx_ctrl.rssi, xTaskGetTickCount());
+    pps_buffer++;
 }
 
 void render(void * pvParameter) {
@@ -128,7 +151,7 @@ void render(void * pvParameter) {
             tmp = tmp->next;
         }
 
-        while (tmp->next->next != NULL) {
+        while (tmp->next->next != NULL && i < SCROLLOFF) {
             if (mode == NORMAL) {
                 if (i == selectedline - scroll) {
                     texthl(true);
@@ -176,15 +199,6 @@ void render(void * pvParameter) {
         tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, TFT_HEIGHT - tft.getCursorY(), TFT_BLACK);
         i = 0;
         vTaskDelay(TFT_REFRESH / portTICK_RATE_MS);
-    }
-}
-
-void channel_switcher(void * pvParameter) {
-    while (true) {
-        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
-        channel = (channel % WIFI_CHANNEL_MAX) + 1;
-
-        vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_RATE_MS);
     }
 }
 
@@ -297,11 +311,13 @@ void setup() {
 
 
     //xTaskCreate(&buttons, "button listener", 512, NULL, 5, NULL);
+    xTaskCreate(&pps_counter, "pps_counter", 512, NULL, 7, NULL);
     xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);
-    xTaskCreate(&render, "render", 2048, NULL, 5, NULL);
+    xTaskCreate(&render, "render", 2048, NULL, 6, NULL);
 }
 
 void loop() {
     button_up.loop();
     button_down.loop();
+    vTaskDelay(10 / portTICK_RATE_MS);
 }
