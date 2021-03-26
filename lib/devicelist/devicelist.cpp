@@ -57,3 +57,7 @@ device* devicelist::get(std::string mac) {
     }
     return NULL;
 }
+
+bool devicelist::isTail(device * tmp) {
+    return tmp == tail;
+}

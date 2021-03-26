@@ -25,6 +25,8 @@ class devicelist {
         int size();
 
         device* get(std::string mac);
+
+        bool isTail(device *tmp);
 };
 
 #endif
