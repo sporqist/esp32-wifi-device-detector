@@ -40,7 +40,6 @@ std::list<std::string> watchlist;
 TFT_eSPI tft = TFT_eSPI(TFT_HEIGHT, TFT_WIDTH);
 Button2 button_up = Button2(BUTTON_UP);
 Button2 button_down = Button2(BUTTON_DOWN);
-//SemaphoreHandle_t buttonsemaphore;
 
 float pps;
 int pps_buffer[10];
@@ -337,14 +336,7 @@ void buttonhandler(Button2& btn) {
             break;
     }
 }
-/*
-void buttons(uint8_t gpio, void * args, uint8_t param) {
-    switch (param) {
-        case 0: Serial.println("UP");
-        case 1: Serial.println("DOWN");
-    }
-}
-*/
+
 void setup() {
     Serial.begin(115200);
     
@@ -374,8 +366,6 @@ void setup() {
     button_up.setLongClickTime(500);
     button_down.setLongClickTime(500);
 
-    //buttonsemaphore = xSemaphoreCreateBinary();
-
     mode = NORMAL;
     pps = 0;
     for (int i = 0; i < 10; i++) {
@@ -386,8 +376,6 @@ void setup() {
     selectedline = 0;
     scroll = 0;
     hl = false;
-
-    //xTaskCreate(&buttons, "button listener", 512, NULL, 5, NULL);
 
     xTaskCreate(&pps_counter, "pps_counter", 768, NULL, 6, NULL);
     xTaskCreate(&online_counter, "online_counter", 768, NULL, 6, NULL);
