@@ -183,7 +183,7 @@ void render(void * pvParameter) {
         
         switch (mode) {
             case NORMAL:
-                tft.println("   NORMAL");
+                tft.println("  NORMAL");
                 scrolloff = normalmode_lines;
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
