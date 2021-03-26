@@ -51,12 +51,6 @@ int scroll;
 
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
 
-bool existsinwatchlist(std::string mac) {
-    std::list<std::string>::iterator it;
-    it = std::find(watchlist.begin(), watchlist.end(), mac);
-    return (it != watchlist.end());
-}
-
 typedef struct {
     unsigned frame_ctrl:16;
     unsigned duration_id:16;
@@ -74,6 +68,12 @@ typedef struct {
 
 esp_err_t event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
+}
+
+bool existsinwatchlist(std::string mac) {
+    std::list<std::string>::iterator it;
+    it = std::find(watchlist.begin(), watchlist.end(), mac);
+    return (it != watchlist.end());
 }
 
 bool hl;
@@ -121,7 +121,7 @@ void pps_counter(void * pvParameter) {
 
 void online_counter(void * pvParameter) {
     TickType_t prevWakeTime;
-    const TickType_t frequency = 1000;         //every secone
+    const TickType_t frequency = 1000;         //every second
     prevWakeTime = xTaskGetTickCount();
 
     int online_tmp = 0;
@@ -187,31 +187,59 @@ void render(void * pvParameter) {
 
         tmp = devices.get();
 
-        if (tmp->next != NULL) {
-            for (int j = 0; j < scroll; j++) {
-                tmp = tmp->next;
-            }
-            
-            switch (mode) {
-                case NORMAL:
-                    tft.println("   NORMAL");
-                    scrolloff = normalmode_lines;
+        for (int j = 0; j < scroll && !devices.isTail(tmp); j++) {
+            tmp = tmp->next;
+        }
+        
+        switch (mode) {
+            case NORMAL:
+                tft.println("     NORMAL");
+                scrolloff = normalmode_lines;
 
-                    while(!devices.isTail(tmp) && i < scrolloff) {
+                while(!devices.isTail(tmp) && i < scrolloff) {
+                    if (i == selectedline - scroll) {
+                        selected = tmp;
+                        texthl(true);
+                    }
+                    if (existsinwatchlist(tmp->mac)) {
+                        tft.print("|| ");
+                    } else {
+                        tft.print("   ");
+                    }
+                    if ((xTaskGetTickCount() - tmp->timestamp) / 1000 < 60) {
+                        tft.printf("%s rssi:    %-4d", tmp->mac.c_str(), tmp->rssi);
+                    } else {
+                        tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
+                    }
+                    if (texthl()) {
+                        tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_WHITE);
+                    } else {
+                        tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
+                    }
+                    tft.println();
+                    texthl(false);
+                    tmp = tmp->next;
+                    i++;
+                }
+                //tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, ((scrolloff - i) * LINE_HEIGHT) - tft.getCursorY(), TFT_BLACK);
+                //tft.println();
+                break;
+            case WATCHLIST:
+                tft.println(" WATCHLIST"); 
+                scrolloff = watchlistmode_lines;
+
+                while(!devices.isTail(tmp) && i < scrolloff) {
+                    if (existsinwatchlist(tmp->mac)) {
                         if (i == selectedline - scroll) {
                             selected = tmp;
                             texthl(true);
                         }
-                        if (existsinwatchlist(tmp->mac)) {
-                            tft.print("|| ");
-                        } else {
-                            tft.print("   ");
-                        }
                         if ((xTaskGetTickCount() - tmp->timestamp) / 1000 < 60) {
-                            tft.printf("%s rssi:    %-4d", tmp->mac.c_str(), tmp->rssi);
+                            tft.printf("%s rssi:    %-3d", tmp->mac.c_str(), tmp->rssi);
                         } else {
                             tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
                         }
+
                         if (texthl()) {
                             tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_WHITE);
                         } else {
@@ -219,52 +247,22 @@ void render(void * pvParameter) {
                         }
                         tft.println();
                         texthl(false);
-                        tmp = tmp->next;
                         i++;
-                    }
-                    //tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, ((scrolloff - i) * LINE_HEIGHT) - tft.getCursorY(), TFT_BLACK);
-                    //tft.println();
-                    break;
-                case WATCHLIST:
-                    tft.println("WATCHLIST"); 
-                    scrolloff = watchlistmode_lines;
-                
-                    while(!devices.isTail(tmp) && i < scrolloff) {
-                        if (existsinwatchlist(tmp->mac)) {
-                            if (i == selectedline - scroll) {
-                                selected = tmp;
-                                texthl(true);
-                            }
-                            if ((xTaskGetTickCount() - tmp->timestamp) / 1000 < 60) {
-                                tft.printf("%s rssi:    %-3d", tmp->mac.c_str(), tmp->rssi);
-                            } else {
-                                tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
-                            }
-
-                            if (texthl()) {
-                                tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_WHITE);
-                            } else {
-                                tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
-                            }
-                            tft.println();
-                            texthl(false);
-                            tmp = tmp->next;
-                            i++;
-                        }                    
-                    }
-                    //tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, ((scrolloff - i) * LINE_HEIGHT) - tft.getCursorY(), TFT_BLACK);
-                    while (i < watchlistmode_lines) {
-                        tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, LINE_HEIGHT, TFT_BLACK);
-                        tft.println();
-                        i++;
-                    }
-                    tft.printf("channel: %-2d", selected->channel);
-                    tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), 8, TFT_BLACK);
+                    }                    
+                    tmp = tmp->next;
+                }
+                //tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, ((scrolloff - i) * LINE_HEIGHT) - tft.getCursorY(), TFT_BLACK);
+                while (i < watchlistmode_lines) {
+                    tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, LINE_HEIGHT, TFT_BLACK);
                     tft.println();
                     i++;
+                }
+                tft.printf("channel: %-2d", selected->channel);
+                tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
+                tft.println();
+                i++;
 
-                    break;
-            }
+                break;
         }
         while (i < 15) {
             tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, LINE_HEIGHT, TFT_BLACK);
