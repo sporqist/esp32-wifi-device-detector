@@ -16,8 +16,8 @@
 
 #include "devicelist.h"
 
-#define WIFI_CHANNEL_SWITCH_INTERVAL        250
-#define TFT_REFRESH                         250
+#define WIFI_CHANNEL_SWITCH_INTERVAL        200
+#define TFT_REFRESH                         200
 
 #define WIFI_CHANNEL_MAX                    13
 #define BUTTON_UP                           35
@@ -87,15 +87,6 @@ void texthl(bool highlight) {
         tft.textbgcolor = TFT_BLACK;
         tft.textcolor = TFT_WHITE;
         hl = false;
-    }
-}
-
-static const char * packettype2str(wifi_promiscuous_pkt_type_t type) {
-    switch(type) {
-        case WIFI_PKT_MGMT: return "MGMT";
-        case WIFI_PKT_DATA: return "DATA";
-    default:  
-      case WIFI_PKT_MISC: return "MISC";
     }
 }
 
@@ -172,7 +163,7 @@ static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
 
 void render(void * pvParameter) {
     TickType_t prevWakeTime;
-    const TickType_t frequency = TFT_REFRESH;         //every secone
+    const TickType_t frequency = TFT_REFRESH;
     prevWakeTime = xTaskGetTickCount();
     
     int i = 0;                          //counts up after each line
@@ -180,14 +171,14 @@ void render(void * pvParameter) {
     device * tmp;
     device * selected;
     while (true) {
-        tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 7, TFT_BLACK);     //overwrite area for new bar
-        tft.fillRect(0, 0, channel * 2, 7, TFT_WHITE);              //loading bar driven by wifi channel switch
+        tft.fillRect(0, 0, WIFI_CHANNEL_MAX * 2, 7, TFT_BLACK);     //overwrite area for new channel indicator
+        tft.fillRect((channel - 1) * 2, 0, 2, 7, TFT_WHITE);        //channel indicator
         tft.setCursor(30, 0);
-        tft.printf("devices %d line %3d - %-3d", devices.size(), scroll + 1, selectedline + 1);
+        tft.printf("devices %d line %3d - %-3d", devices.size(), scroll + 1, selectedline + 1);     //headline
 
         tmp = devices.get();
 
-        for (int j = 0; j < scroll && !devices.isTail(tmp); j++) {
+        for (int j = 0; j < scroll && !devices.isTail(tmp); j++) {      //skip devices until scroll point is reached
             tmp = tmp->next;
         }
         
@@ -197,7 +188,7 @@ void render(void * pvParameter) {
                 scrolloff = normalmode_lines;
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
-                    if (i == selectedline - scroll) {
+                    if (i == selectedline - scroll) {           //highlight selected line
                         selected = tmp;
                         texthl(true);
                     }
@@ -211,6 +202,7 @@ void render(void * pvParameter) {
                     } else {
                         tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
                     }
+                    //overwrite rest of the line so no remains of old frames are displayed
                     if (texthl()) {
                         tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_WHITE);
                     } else {
@@ -221,8 +213,6 @@ void render(void * pvParameter) {
                     tmp = tmp->next;
                     i++;
                 }
-                //tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, ((scrolloff - i) * LINE_HEIGHT) - tft.getCursorY(), TFT_BLACK);
-                //tft.println();
                 break;
             case WATCHLIST:
                 tft.println(" WATCHLIST"); 
@@ -230,7 +220,7 @@ void render(void * pvParameter) {
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
                     if (existsinwatchlist(tmp->mac)) {
-                        if (i == selectedline - scroll) {
+                        if (i == selectedline - scroll) {       //highlight selected line
                             selected = tmp;
                             texthl(true);
                         }
@@ -239,7 +229,7 @@ void render(void * pvParameter) {
                         } else {
                             tft.printf("%s offline: %d min", tmp->mac.c_str(), (int) tmp->timestamp / 1000 / 60 + 1);
                         }
-
+                        //overwrite rest of the line so no remains of old frames are displayed
                         if (texthl()) {
                             tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_WHITE);
                         } else {
@@ -251,7 +241,6 @@ void render(void * pvParameter) {
                     }                    
                     tmp = tmp->next;
                 }
-                //tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, ((scrolloff - i) * LINE_HEIGHT) - tft.getCursorY(), TFT_BLACK);
                 while (i < watchlistmode_lines) {
                     tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, LINE_HEIGHT, TFT_BLACK);
                     tft.println();
@@ -400,9 +389,9 @@ void setup() {
 
     //xTaskCreate(&buttons, "button listener", 512, NULL, 5, NULL);
 
-    xTaskCreate(&pps_counter, "pps_counter", 512, NULL, 6, NULL);
-    xTaskCreate(&online_counter, "online_counter", 512, NULL, 6, NULL);
-    xTaskCreate(&channel_switcher, "wifi channel switcher", 1024, NULL, 5, NULL);
+    xTaskCreate(&pps_counter, "pps_counter", 768, NULL, 6, NULL);
+    xTaskCreate(&online_counter, "online_counter", 768, NULL, 6, NULL);
+    xTaskCreate(&channel_switcher, "channel switcher", 1024, NULL, 5, NULL);
     xTaskCreate(&render, "render", 2048, NULL, 9, NULL);
 }
 
