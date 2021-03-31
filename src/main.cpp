@@ -13,6 +13,7 @@
 
 #include <string>
 #include <list>
+#include <map>
 
 #include "devicelist.h"
 #include "ieee802_11_frames.h"
@@ -37,6 +38,7 @@ Modi mode;
 
 devicelist devices;
 std::list<std::string> watchlist;
+std::map<std::string, std::list<std::string>> watchlist1;
 
 TFT_eSPI tft = TFT_eSPI(TFT_HEIGHT, TFT_WIDTH);
 Button2 button_up = Button2(BUTTON_UP);
@@ -51,15 +53,17 @@ int scroll;
 
 static wifi_country_t wifi_country = {.cc="CN", .schan = 1, .nchan = 13}; //Most recent esp32 library struct
 
-
 esp_err_t event_handler(void *ctx, system_event_t *event) {
     return ESP_OK;
 }
-
+/*
 bool existsinwatchlist(std::string mac) {
     std::list<std::string>::iterator it;
     it = std::find(watchlist.begin(), watchlist.end(), mac);
     return (it != watchlist.end());
+}*/
+bool existsinwatchlist(std::string mac) {
+    return watchlist1.find(mac) != watchlist1.end();
 }
 
 bool hl;
@@ -80,7 +84,7 @@ void pps_counter(void * pvParameter) {
     TickType_t prevWakeTime;
     const TickType_t frequency = 1000;          //every second
     prevWakeTime = xTaskGetTickCount(); 
-        
+
     float tmp = 0;
     while (true) {
         for (int i = 0; i < 9; i++) {
@@ -115,14 +119,14 @@ void online_counter(void * pvParameter) {
         online_tmp = 0;
 
         vTaskDelayUntil(&prevWakeTime, frequency);
-    }    
+    }
 }
 
 void channel_switcher(void * pvParameter) {
     TickType_t prevWakeTime;
     const TickType_t frequency = WIFI_CHANNEL_SWITCH_INTERVAL;
     prevWakeTime = xTaskGetTickCount();
-    
+
     while (true) {
         esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
         channel = (channel % WIFI_CHANNEL_MAX) + 1;
@@ -131,19 +135,55 @@ void channel_switcher(void * pvParameter) {
     }
 }
 
-static void packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
-    if (type != WIFI_PKT_MGMT)
-        return;
+static void getSSID(std::string *ssid, const uint8_t* mgmt_info_elements) {
+    int i = 0;
+    while (i < sizeof(mgmt_info_elements)) {
+        if (mgmt_info_elements[i] == 0) {
+            i++;
+            int length = i;
+            i++;
+            while (i < length) {
+                ssid += mgmt_info_elements[i];
+                i++;
+            }
+        } else {
+            i = mgmt_info_elements[i+1] + 2;
+        }
+    }
+    return;
+}
 
+static void ICACHE_FLASH_ATTR packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
     const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
     
-    char buffer[18];
-    sprintf(buffer, "%02x:%02x:%02x:%02x:%02x:%02x",
+    unsigned int frameControl = ((unsigned int)ppkt->payload[1] << 8) + ppkt->payload[0];
+
+    //uint8_t version      = (frameControl & 0b0000000000000011) >> 0;
+    uint8_t frameType    = (frameControl & 0b0000000000001100) >> 2;
+    uint8_t frameSubType = (frameControl & 0b0000000011110000) >> 4;
+    //uint8_t toDS         = (frameControl & 0b0000000100000000) >> 8;
+    //uint8_t fromDS       = (frameControl & 0b0000001000000000) >> 9;
+
+    char mac[18];
+    sprintf(mac, "%02x:%02x:%02x:%02x:%02x:%02x",
             hdr->addr2[0],hdr->addr2[1],hdr->addr2[2],
             hdr->addr2[3],hdr->addr2[4],hdr->addr2[5]);
-    devices.insert(buffer, ppkt->rx_ctrl.rssi, xTaskGetTickCount(), channel);
+    devices.insert(mac, ppkt->rx_ctrl.rssi, xTaskGetTickCount(), channel);
+
+    //if (existsinwatchlist(buffer)) {
+        if (frameType == WIFI_PKT_MGMT) {
+            if (frameSubType == WIFI_MGMT_SUBTYPE_PROBE_REQUEST) {
+                const wifi_ieee80211_mgmt_packet_t *mgmt = (wifi_ieee80211_mgmt_packet_t *)ppkt->payload;
+                std::string ssid;
+                getSSID(&ssid, mgmt->payload);
+                watchlist1[mac].push_back(ssid);
+                printf("%s\n", ssid);
+
+            }
+        }
+    //}
     pps_buffer[9]++;
 }
 
@@ -170,7 +210,7 @@ void render(void * pvParameter) {
         
         switch (mode) {
             case NORMAL:
-                tft.println("  NORMAL");
+                tft.println("   NORMAL");
                 scrolloff = normalmode_lines;
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
@@ -201,7 +241,7 @@ void render(void * pvParameter) {
                 }
                 break;
             case WATCHLIST:
-                tft.println("WATCHLIST"); 
+                tft.println("WATCHLIST");
                 scrolloff = watchlistmode_lines;
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
@@ -224,7 +264,7 @@ void render(void * pvParameter) {
                         tft.println();
                         texthl(false);
                         i++;
-                    }                    
+                    }
                     tmp = tmp->next;
                 }
                 while (i < watchlistmode_lines) {
@@ -232,10 +272,18 @@ void render(void * pvParameter) {
                     tft.println();
                     i++;
                 }
-                tft.printf("channel: %-2d", selected->channel);
-                tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
-                tft.println();
-                i++;
+                std::list<std::string>::iterator it;
+                it = watchlist1[selected->mac].begin();
+                for (int h = 0; h < 5 && it != watchlist1[selected->mac].end(); h++, it++) {
+                    tft.printf("%s", *it);
+                    tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
+                    tft.println();
+                    i++;
+                }
+                //tft.printf("channel: %-2d", selected->channel);
+                //tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
+                //tft.println();
+                //i++;
 
                 break;
         }
@@ -256,12 +304,13 @@ void buttonhandler(Button2& btn) {
     int listsize;
     int scrolloff;
     switch (mode) {
-        case NORMAL: 
-            listsize = devices.size(); 
+        case NORMAL:
+            listsize = devices.size();
             scrolloff = normalmode_lines;
             break;
-        case WATCHLIST: 
-            listsize = watchlist.size(); 
+        case WATCHLIST:
+            //listsize = watchlist.size();
+            listsize = watchlist1.size();
             scrolloff = watchlistmode_lines;
             break;
     }
@@ -270,7 +319,7 @@ void buttonhandler(Button2& btn) {
         case BUTTON_DOWN: button = 1; break;
     }
     switch (btn.getClickType()) {
-        case SINGLE_CLICK: 
+        case SINGLE_CLICK:
             if (button) {   //DOWN
                 if (selectedline < listsize - 1) {
                     selectedline++;
@@ -310,15 +359,19 @@ void buttonhandler(Button2& btn) {
                     tmp = devices.get();
                     for (int i = 0; i < selectedline; i++) {
                         tmp = tmp->next;
-                    }
+                    }/*
                     if (!existsinwatchlist(tmp->mac)) {
                         watchlist.push_back(tmp->mac);
                     } else {
                         watchlist.remove(tmp->mac);
+                    }*/
+                    if (!existsinwatchlist(tmp->mac)) {
+                        watchlist1.insert(std::make_pair(tmp->mac, std::list<std::string>()));
+                    } else {
+                        watchlist1.erase(tmp->mac);
                     }
                 } else if (mode == WATCHLIST) {
                 }
-                
             }
             break;
     }
@@ -326,7 +379,7 @@ void buttonhandler(Button2& btn) {
 
 void setup() {
     Serial.begin(115200);
-    
+
     nvs_flash_init();
     tcpip_adapter_init();
     ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
