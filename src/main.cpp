@@ -135,29 +135,30 @@ void channel_switcher(void * pvParameter) {
     }
 }
 
-static void getSSID(std::string *ssid, const uint8_t* mgmt_info_elements) {
+static std::string getSSID(const uint8_t* mgmt_info_elements) {
+    std::string ssid = "";
     int i = 0;
     while (i < sizeof(mgmt_info_elements)) {
+        int length = mgmt_info_elements[i + 1];
         if (mgmt_info_elements[i] == 0) {
-            i++;
-            int length = i;
-            i++;
+            i += 2;
             while (i < length) {
                 ssid += mgmt_info_elements[i];
                 i++;
             }
+            break;
         } else {
-            i = mgmt_info_elements[i+1] + 2;
+            i += length + 2;
         }
     }
-    return;
+    return ssid;
 }
 
 static void ICACHE_FLASH_ATTR packet_handler(void* buff, wifi_promiscuous_pkt_type_t type) {
     const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
     const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
-    
+
     unsigned int frameControl = ((unsigned int)ppkt->payload[1] << 8) + ppkt->payload[0];
 
     //uint8_t version      = (frameControl & 0b0000000000000011) >> 0;
@@ -176,11 +177,9 @@ static void ICACHE_FLASH_ATTR packet_handler(void* buff, wifi_promiscuous_pkt_ty
         if (frameType == WIFI_PKT_MGMT) {
             if (frameSubType == WIFI_MGMT_SUBTYPE_PROBE_REQUEST) {
                 const wifi_ieee80211_mgmt_packet_t *mgmt = (wifi_ieee80211_mgmt_packet_t *)ppkt->payload;
-                std::string ssid;
-                getSSID(&ssid, mgmt->payload);
+                std::string ssid = getSSID(mgmt->payload);
                 watchlist1[mac].push_back(ssid);
                 printf("%s\n", ssid);
-
             }
         }
     //}
