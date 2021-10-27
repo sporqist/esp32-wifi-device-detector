@@ -30,7 +30,7 @@
 #define TFT_HEIGHT                          135
 
 static const int normalmode_lines = 15;
-static const int watchlistmode_lines = 10;
+static const int watchlistmode_lines = 15;
 
 enum Modi {NORMAL, WATCHLIST};
 Modi mode;
@@ -231,11 +231,11 @@ void render(void * pvParameter) {
                     tft.fillRect(0, tft.getCursorY(), TFT_WIDTH, LINE_HEIGHT, TFT_BLACK);
                     tft.println();
                     i++;
-                }
+                }/*
                 tft.printf("channel: %-2d", selected->channel);
                 tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
                 tft.println();
-                i++;
+                i++;*/                
 
                 break;
         }
