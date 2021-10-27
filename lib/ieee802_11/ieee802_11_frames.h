@@ -1,10 +1,6 @@
-#ifndef ieee802_11_frames.h
-#define ieee802_11_frames.h
+#ifndef ieee802_11_frames
+#define ieee802_11_frames 
 
-typedef struct {
-    wifi_ieee80211_mac_hdr_t hdr;
-    uint8_t payload[0];             /* network data ended with 4 bytes csum (CRC32) */
-} wifi_ieee80211_packet_t;
 
 typedef struct {
     unsigned frame_ctrl:16;
@@ -15,5 +11,10 @@ typedef struct {
     unsigned sequence_ctrl:16;
     uint8_t addr4[6];               /* optional */
 } wifi_ieee80211_mac_hdr_t;
+
+typedef struct {
+    wifi_ieee80211_mac_hdr_t hdr;
+    uint8_t payload[0];             /* network data ended with 4 bytes csum (CRC32) */
+} wifi_ieee80211_packet_t;
 
 #endif
