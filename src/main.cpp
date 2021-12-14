@@ -346,11 +346,11 @@ void setup() {
 
     button_up.setClickHandler(buttonhandler);
     button_up.setLongClickHandler(buttonhandler);
+    button_up.setDoubleClickTime(100);
+    button_up.setLongClickTime(500);
     button_down.setClickHandler(buttonhandler);
     button_down.setLongClickHandler(buttonhandler);
-    button_up.setDoubleClickTime(100);
     button_down.setDoubleClickTime(100);
-    button_up.setLongClickTime(500);
     button_down.setLongClickTime(500);
 
     mode = NORMAL;
