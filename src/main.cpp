@@ -252,7 +252,7 @@ void render(void * pvParameter) {
 }
 
 void buttonhandler(Button2& btn) {
-    int button;
+    int button = btn.getAttachPin();
     int listsize;
     int scrolloff;
     switch (mode) {
@@ -265,13 +265,9 @@ void buttonhandler(Button2& btn) {
             scrolloff = watchlistmode_lines;
             break;
     }
-    switch (btn.getAttachPin()) {
-        case BUTTON_UP: button = 0; break;
-        case BUTTON_DOWN: button = 1; break;
-    }
     switch (btn.getClickType()) {
         case SINGLE_CLICK: 
-            if (button) {   //DOWN
+            if (button == BUTTON_DOWN) {
                 if (selectedline < listsize - 1) {
                     selectedline++;
                     if (scroll + scrolloff - 1 < selectedline) {
@@ -281,7 +277,7 @@ void buttonhandler(Button2& btn) {
                     selectedline = 0;
                     scroll = 0;
                 }
-            } else {        //UP
+            } else if (button == BUTTON_UP) {
                 if (selectedline != 0) {
                     selectedline--;
                     if (selectedline == scroll - 1) {
@@ -296,7 +292,7 @@ void buttonhandler(Button2& btn) {
             }
             break;
         case LONG_CLICK:
-            if (button) {   //DOWN
+            if (button == BUTTON_DOWN) {
                 scroll = 0;
                 selectedline = 0;
                 if (mode == NORMAL) { 
@@ -304,7 +300,7 @@ void buttonhandler(Button2& btn) {
                 } else {
                     mode = NORMAL;
                 }
-            } else {        //UP
+            } else if (button == BUTTON_UP) {
                 if (mode == NORMAL) {
                     device *tmp;
                     tmp = devices.get();
@@ -317,6 +313,7 @@ void buttonhandler(Button2& btn) {
                         watchlist.remove(tmp->mac);
                     }
                 } else if (mode == WATCHLIST) {
+                    //stub for future use
                 }
                 
             }
