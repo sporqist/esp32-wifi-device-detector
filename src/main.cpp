@@ -170,7 +170,9 @@ void render(void * pvParameter) {
         
         switch (mode) {
             case NORMAL:
-                tft.println("  NORMAL");
+                tft.print("NORMAL");
+                tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
+                tft.println();
                 scrolloff = normalmode_lines;
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
@@ -202,6 +204,8 @@ void render(void * pvParameter) {
                 break;
             case WATCHLIST:
                 tft.println("WATCHLIST"); 
+                tft.fillRect(tft.getCursorX(), tft.getCursorY(), TFT_WIDTH - tft.getCursorX(), LINE_HEIGHT, TFT_BLACK);
+                tft.println();
                 scrolloff = watchlistmode_lines;
 
                 while(!devices.isTail(tmp) && i < scrolloff) {
