@@ -1,6 +1,6 @@
-# ESP32-WiFi-device-detector
+# ESP32 WiFi Device Detector
 
-This turns a TTGO T-Display into a tool for finding all transmitting 2.4GHz wifi devices in range. It rotates through a set range of wifi channels, captures packets in promiscuous mode and puts the sending MAC address of each Packet into a list.
+This turns a TTGO T-Display into a tool for finding transmitting 2.4GHz wifi devices in the area. It rotates through a set range of wifi channels, captures packets in promiscuous mode and puts the sending MAC address of each captured Packet into a list.
 
 ## Setup
 
